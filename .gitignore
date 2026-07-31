@@ -1,0 +1,13 @@
+# Whitelist mode: ignore everything, then re-include only the rig editor files.
+/*
+
+!.gitignore
+!README.md
+!RIG_EDITOR_GUIDE.md
+!astro_rooster_rig_editor.html
+!chickenrun-background-lite.webp
+!rig-editor/
+!bone-rig/
+
+# Unused legacy asset (replaced by rooster-body-v2.png)
+bone-rig/rooster-body.png
