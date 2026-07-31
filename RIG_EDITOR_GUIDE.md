@@ -1,6 +1,6 @@
 # Astro Rooster 2.5D Rig Editor
 
-Open `astro_rooster_rig_editor.html` in a modern browser. The editor is local-only and does not need a server or an internet connection.
+Open `index.html` in a modern browser. The editor is local-only and does not need a server or an internet connection.
 
 ## Character & Scene library
 

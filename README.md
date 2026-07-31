@@ -4,7 +4,7 @@ A lightweight 2.5D character, scene, and skeletal animation editor for the Astro
 
 ## Usage
 
-Open `astro_rooster_rig_editor.html` in a modern browser. That's it.
+Open `index.html` in a modern browser. That's it. (The old `astro_rooster_rig_editor.html` link still works — it redirects here.)
 
 ## Features
 
@@ -20,7 +20,8 @@ See [RIG_EDITOR_GUIDE.md](RIG_EDITOR_GUIDE.md) for the full guide.
 ## Project structure
 
 ```
-astro_rooster_rig_editor.html   Entry point
+index.html                      Entry point
+astro_rooster_rig_editor.html   Redirect stub (old link)
 rig-editor/                     Editor JS, CSS, and assets
 bone-rig/                       PNG body parts for the MAL rig
 chickenrun-background-lite.webp Default village backdrop

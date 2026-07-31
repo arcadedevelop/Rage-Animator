@@ -1,0 +1,361 @@
+<!doctype html>
+<html lang="my">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#100d0b">
+  <meta name="description" content="A lightweight 2.5D character, scene, and skeletal animation editor for the Astro Rooster story world.">
+  <title>Astro Rooster · Character & 2.5D Rig Editor</title>
+  <link rel="stylesheet" href="rig-editor/rig-editor.css?v=10">
+</head>
+<body>
+  <div class="editor-app" id="editorApp">
+    <header class="topbar">
+      <div class="brand-lockup">
+        <span class="brand-mark">AR</span>
+        <div>
+          <h1>Astro Rooster Rig</h1>
+          <p>Lightweight 2.5D skeletal animation editor</p>
+        </div>
+      </div>
+
+      <div class="transport" aria-label="Playback controls">
+        <button class="tool-button" id="undoButton" type="button" title="Undo (Ctrl+Z)">↶</button>
+        <button class="tool-button" id="redoButton" type="button" title="Redo (Ctrl+Shift+Z)">↷</button>
+        <span class="toolbar-divider" aria-hidden="true"></span>
+        <button class="tool-button primary" id="playButton" type="button" aria-label="Play animation" title="Play / Pause (Space)">
+          <span id="playIcon" aria-hidden="true">▶</span>
+        </button>
+        <button class="tool-button" id="stopButton" type="button" aria-label="Stop and return to start" title="Stop">■</button>
+        <output class="timecode" id="timecode">00:00:000</output>
+        <span class="fps-chip">12 FPS keys · 60 Hz smooth view</span>
+      </div>
+
+      <div class="file-tools">
+        <span class="save-state" id="saveState">Local autosave ready</span>
+        <button class="text-button" id="importButton" type="button">Import Character</button>
+        <button class="text-button accent" id="exportButton" type="button">Export Character</button>
+        <input id="importInput" type="file" accept="application/json,.json" hidden>
+        <input id="sceneImageInput" type="file" accept="image/*" hidden>
+      </div>
+    </header>
+
+    <div class="library-bar" aria-label="Character and scene library">
+      <div class="lib-group">
+        <span class="kicker">Character</span>
+        <select class="lib-select" id="characterSelect" aria-label="Active character"></select>
+        <button class="mini-button" id="newCharacterButton" type="button" title="Save a customizable copy of the current character">＋ Copy</button>
+        <button class="mini-button" id="renameCharacterButton" type="button">Rename</button>
+        <button class="mini-button" id="deleteCharacterButton" type="button">Delete</button>
+      </div>
+      <div class="lib-group">
+        <span class="kicker">Scene</span>
+        <select class="lib-select" id="sceneSelect" aria-label="Active scene"></select>
+        <button class="mini-button" id="addSceneButton" type="button" title="Add a background image as a new scene">＋ Image</button>
+        <input class="scene-color-input" id="sceneColorInput" type="color" value="#d9d2c5" aria-label="Custom solid background color" title="Choose a solid background color">
+        <button class="mini-button" id="useSolidColorButton" type="button" title="Use the selected one-color background">Use Color</button>
+        <button class="mini-button" id="deleteSceneButton" type="button">Delete</button>
+      </div>
+      <div class="lib-group keyframe-lib-group">
+        <span class="kicker">Keyframe Set</span>
+        <select class="lib-select" id="keyframeSetSelect" aria-label="Ready-made keyframe set"></select>
+        <button class="mini-button accent" id="applyKeyframeSetButton" type="button" title="Add this set as a new editable clip">＋ Apply</button>
+        <button class="mini-button" id="saveKeyframeSetButton" type="button" title="Save the active clip into the keyframe library">Save Clip</button>
+        <button class="mini-button" id="exportKeyframeSetButton" type="button">Export Set</button>
+        <button class="mini-button" id="importKeyframeSetButton" type="button">Import Set</button>
+        <button class="mini-button" id="deleteKeyframeSetButton" type="button">Delete</button>
+        <input id="keyframeSetInput" type="file" accept="application/json,.json" hidden>
+      </div>
+    </div>
+
+    <main class="workspace">
+      <aside class="panel hierarchy-panel" id="hierarchyPanel" aria-label="Rig hierarchy">
+        <div class="panel-heading">
+          <div>
+            <span class="kicker">Hierarchy</span>
+            <h2>Bones</h2>
+          </div>
+          <span class="count-badge" id="boneCount">15</span>
+        </div>
+        <p class="panel-note">Bone ကိုရွေးပြီး Inspector မှာ transform ပြင်ပါ။</p>
+        <div class="bone-list" id="boneList" role="tree" aria-label="Character bone hierarchy"></div>
+      </aside>
+
+      <section class="viewport-panel" id="viewportPanel" aria-label="Animation viewport">
+        <div class="viewport-toolbar">
+          <div class="shot-info">
+            <span class="status-dot"></span>
+            <strong id="activeClipLabel">RUN CYCLE</strong>
+          </div>
+          <div class="view-toggles">
+            <button class="mini-button active" id="skeletonToggle" type="button" aria-pressed="true">Bones</button>
+            <button class="mini-button" id="onionToggle" type="button" aria-pressed="false">Onion Skin</button>
+            <button class="mini-button ai-assist" id="aiAssistToggle" type="button" aria-pressed="false" title="Auto-smooths neighbouring keyframes with ease-in/ease-out when you move a bone">✨ AI Assist</button>
+            <button class="mini-button active" id="gridToggle" type="button" aria-pressed="true">3D Grid</button>
+            <button class="mini-button help-button active" id="controlHelpButton" type="button" aria-pressed="true">? Controls</button>
+          </div>
+        </div>
+
+        <div class="stage-shell show-grid" id="stageShell">
+          <img
+            class="scene-art"
+            id="sceneArt"
+            src="chickenrun-background-lite.webp"
+            alt="Scene background for the animation stage"
+            draggable="false"
+          >
+          <div class="perspective-floor" aria-hidden="true"></div>
+          <canvas id="rigCanvas" aria-label="Editable skeletal character rig"></canvas>
+          <div class="stage-vignette" aria-hidden="true"></div>
+          <div class="camera-controls" aria-label="Stage camera controls">
+            <button id="zoomOutButton" type="button" aria-label="Zoom out">−</button>
+            <output id="cameraZoomLevel">100%</output>
+            <button id="zoomInButton" type="button" aria-label="Zoom in">＋</button>
+            <button class="fit-camera-button" id="fitCameraButton" type="button">Fit</button>
+          </div>
+          <div class="interaction-dock" id="interactionDock" role="toolbar" aria-label="Direct rig tools">
+            <button class="rig-tool" data-tool="hand" type="button" aria-pressed="false" title="Hand camera pan (H)">
+              <span aria-hidden="true">✋</span>
+              <small>Hand</small>
+            </button>
+            <button class="rig-tool active" data-tool="move" type="button" aria-pressed="true">
+              <span aria-hidden="true">✥</span>
+              <small>Move</small>
+            </button>
+            <button class="rig-tool" data-tool="rotate" type="button" aria-pressed="false">
+              <span aria-hidden="true">↻</span>
+              <small>Rotate</small>
+            </button>
+            <button class="rig-tool" data-tool="tilt" type="button" aria-pressed="false">
+              <span aria-hidden="true">◫</span>
+              <small>2.5D Tilt</small>
+            </button>
+            <button class="rig-tool" data-tool="depth" type="button" aria-pressed="false">
+              <span aria-hidden="true">⇅</span>
+              <small>Depth</small>
+            </button>
+            <button class="rig-tool" data-tool="whole" type="button" aria-pressed="false">
+              <span aria-hidden="true">◎</span>
+              <small>Whole Rig</small>
+            </button>
+            <button class="rig-tool" data-tool="path" type="button" aria-pressed="false">
+              <span aria-hidden="true">⌁</span>
+              <small>Path</small>
+            </button>
+          </div>
+          <output class="gesture-readout" id="gestureReadout" aria-live="polite">MOVE · Drag a joint or body part</output>
+          <aside class="control-coach" id="controlCoach" aria-label="On-canvas control guide">
+            <div class="coach-heading">
+              <div>
+                <span class="kicker">Control Points</span>
+                <strong>Tap → control handle ကိုဆွဲပါ</strong>
+              </div>
+              <button id="closeControlCoach" type="button" aria-label="Close control guide">×</button>
+            </div>
+            <div class="coach-step">
+              <span class="coach-swatch move-swatch">✥</span>
+              <p><b>Move</b><small>အပြာအလယ်စက်ကို ဆွဲပါ</small></p>
+            </div>
+            <div class="coach-step">
+              <span class="coach-swatch rotate-swatch">↻</span>
+              <p><b>Rotate</b><small>လိမ္မော်ဝိုင်း သို့မဟုတ် ↻ handle ကိုဆွဲပါ</small></p>
+            </div>
+            <div class="coach-step">
+              <span class="coach-swatch depth-swatch">⇅</span>
+              <p><b>Depth</b><small>အစိမ်း diamond ကို အပေါ်/အောက်ဆွဲပါ</small></p>
+            </div>
+            <div class="coach-step">
+              <span class="coach-swatch layer-swatch">＋</span>
+              <p><b>Layer</b><small>FRONT + / BACK − ကိုတစ်ချက်နှိပ်ပါ</small></p>
+            </div>
+            <div class="coach-step">
+              <span class="coach-swatch camera-swatch">⌕</span>
+              <p><b>Camera</b><small>Hand drag / Middle-mouse drag / Touchpad ၂ချောင်း = Pan</small></p>
+            </div>
+            <p class="coach-tip"><b>Auto Key ON</b> ဆိုရင် ပြင်တာကို keyframe အဖြစ်ချက်ချင်းသိမ်းပေးပါတယ်။</p>
+          </aside>
+          <div class="stage-loading" id="stageLoading">Loading rig parts…</div>
+          <div class="view-stats" aria-live="polite">
+            <span id="renderStatus">READY</span>
+            <span id="selectedStatus">Rooster Body</span>
+          </div>
+        </div>
+      </section>
+
+      <aside class="panel inspector-panel" id="inspectorPanel" aria-label="Selected bone inspector">
+        <div class="panel-heading">
+          <div>
+            <span class="kicker">Inspector</span>
+            <h2 id="selectedBoneName">Rooster Body</h2>
+          </div>
+          <span class="depth-badge">2.5D</span>
+        </div>
+
+        <div class="inspector-actions">
+          <label class="toggle-row">
+            <input id="autoKeyToggle" type="checkbox" checked>
+            <span>Auto Key</span>
+          </label>
+          <button class="compact-button accent" id="addKeyButton" type="button">◆ Add / Update Key</button>
+          <button class="compact-button danger" id="deleteKeyButton" type="button">Delete Key</button>
+        </div>
+
+        <div class="control-group direct-control-group">
+          <div class="group-title">
+            <span>Layer & Path</span>
+            <small>Direct 2.5D controls</small>
+          </div>
+          <div class="layer-buttons">
+            <button class="compact-button" id="layerDownButton" type="button">Layer − Back</button>
+            <button class="compact-button" id="layerUpButton" type="button">Layer + Front</button>
+          </div>
+          <label class="toggle-row path-toggle">
+            <input id="autoOrientPathToggle" type="checkbox">
+            <span>Auto rotate along motion path</span>
+          </label>
+          <label class="property-row path-offset-row">
+            <span>Offset</span>
+            <input id="pathAngleOffset" type="range" min="-180" max="180" step="1" value="0">
+            <output id="pathAngleOffsetOutput">0°</output>
+          </label>
+          <button class="reset-button path-orient-button" id="orientPathButton" type="button">Orient current key to path</button>
+        </div>
+
+        <div class="control-group">
+          <div class="group-title">
+            <span>Position</span>
+            <small>Joint-local pixels</small>
+          </div>
+          <label class="property-row">
+            <span>X</span>
+            <input data-prop="tx" type="range" min="-140" max="140" step="1">
+            <output data-output="tx">0</output>
+          </label>
+          <label class="property-row">
+            <span>Y</span>
+            <input data-prop="ty" type="range" min="-140" max="140" step="1">
+            <output data-output="ty">0</output>
+          </label>
+        </div>
+
+        <div class="control-group">
+          <div class="group-title">
+            <span>Rotation</span>
+            <small>2.5D joint controls</small>
+          </div>
+          <label class="property-row">
+            <span>Z</span>
+            <input data-prop="rz" type="range" min="-180" max="180" step=".5">
+            <output data-output="rz">0°</output>
+          </label>
+          <label class="property-row">
+            <span>Y Tilt</span>
+            <input data-prop="ry" type="range" min="-65" max="65" step=".5">
+            <output data-output="ry">0°</output>
+          </label>
+        </div>
+
+        <div class="control-group">
+          <div class="group-title">
+            <span>Depth & Scale</span>
+            <small>Layer/perspective</small>
+          </div>
+          <label class="property-row">
+            <span>Z Depth</span>
+            <input data-prop="z" type="range" min="-160" max="160" step="1">
+            <output data-output="z">0</output>
+          </label>
+          <label class="property-row">
+            <span>Scale</span>
+            <input data-prop="scale" type="range" min=".55" max="1.45" step=".01">
+            <output data-output="scale">1.00×</output>
+          </label>
+        </div>
+
+        <button class="reset-button" id="resetTransformButton" type="button">Reset current transform</button>
+
+        <div class="help-card">
+          <strong>Keyboard</strong>
+          <span>Canvas — Select a tool, then mouse/touch drag</span>
+          <span>H — Hand tool · Middle mouse — Pan</span>
+          <span>Touchpad — Two-finger pan · Pinch zoom</span>
+          <span>Camera — Two fingers zoom + pan</span>
+          <span>Whole Rig — One finger moves the root</span>
+          <span>Space — Play/Pause</span>
+          <span>K — Add keyframe</span>
+          <span>A — ✨ AI Assist on/off</span>
+          <span>Delete — Remove key</span>
+          <span>← / → — Previous/next frame</span>
+        </div>
+      </aside>
+    </main>
+
+    <section class="timeline-panel" id="timelinePanel" aria-label="Keyframe timeline">
+      <div class="clip-bar" aria-label="Animation clips and actions">
+        <span class="kicker">Clips</span>
+        <div class="clip-tabs" id="clipTabs" role="tablist" aria-label="Animation actions"></div>
+        <div class="clip-actions">
+          <button class="compact-button accent" id="newClipButton" type="button" title="New empty action">＋ New</button>
+          <button class="compact-button" id="duplicateClipButton" type="button" title="Duplicate current action">Duplicate</button>
+          <button class="compact-button" id="renameClipButton" type="button" title="Rename current action">Rename</button>
+          <button class="compact-button danger" id="deleteClipButton" type="button" title="Delete current action">Delete</button>
+        </div>
+      </div>
+      <div class="timeline-toolbar">
+        <div>
+          <span class="kicker">Dope Sheet</span>
+          <strong id="frameReadout">Frame 000 · 0 ms</strong>
+        </div>
+        <label class="duration-control">
+          <span>Loop</span>
+          <input id="durationInput" type="number" min="400" max="10000" step="100" value="1600">
+          <span>ms</span>
+        </label>
+        <label class="snap-control">
+          <span>Snap</span>
+          <select id="snapSelect">
+            <option value="12" selected>12 FPS</option>
+            <option value="24">24 FPS</option>
+            <option value="30">30 FPS</option>
+            <option value="60">60 FPS</option>
+            <option value="0">Free</option>
+          </select>
+        </label>
+        <button class="compact-button" id="previousKeyButton" type="button">Previous Key</button>
+        <button class="compact-button" id="nextKeyButton" type="button">Next Key</button>
+      </div>
+
+      <div class="scrubber-row">
+        <span>0</span>
+        <input id="timelineScrubber" type="range" min="0" max="1600" step="1" value="0" aria-label="Timeline playhead">
+        <span id="durationLabel">1600 ms</span>
+      </div>
+
+      <div class="tracks-scroll" id="tracksScroll">
+        <div class="ruler-row">
+          <span class="track-label">Bone / Time</span>
+          <div class="ruler" id="timelineRuler"></div>
+        </div>
+        <div class="tracks-body" id="tracksBody">
+          <div class="timeline-playhead" id="timelinePlayhead" aria-hidden="true"></div>
+        </div>
+      </div>
+    </section>
+
+    <footer class="statusbar">
+      <span>Canvas 2D · no WebGL · no bone physics · local-only autosave</span>
+      <span id="keyCountStatus">0 keyframes</span>
+    </footer>
+
+    <nav class="mobile-nav" aria-label="Mobile editor navigation">
+      <button class="active" data-scroll-target="viewportPanel" type="button"><span>▣</span><small>Stage</small></button>
+      <button data-scroll-target="hierarchyPanel" type="button"><span>◇</span><small>Bones</small></button>
+      <button class="mobile-key-button" id="mobileAddKeyButton" type="button"><span>◆</span><small>Key</small></button>
+      <button data-scroll-target="inspectorPanel" type="button"><span>☷</span><small>Controls</small></button>
+      <button data-scroll-target="timelinePanel" type="button"><span>⌁</span><small>Timeline</small></button>
+    </nav>
+  </div>
+
+  <script src="rig-editor/rig-editor.js?v=10"></script>
+</body>
+</html>
