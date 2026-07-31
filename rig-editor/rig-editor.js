@@ -704,6 +704,7 @@
     exportButton: document.getElementById("exportButton"),
     skeletonToggle: document.getElementById("skeletonToggle"),
     onionToggle: document.getElementById("onionToggle"),
+    aiAssistToggle: document.getElementById("aiAssistToggle"),
     gridToggle: document.getElementById("gridToggle"),
     autoKeyToggle: document.getElementById("autoKeyToggle"),
     addKeyButton: document.getElementById("addKeyButton"),
@@ -798,6 +799,8 @@
     },
     showSkeleton: true,
     showOnion: false,
+    aiAssist: false,
+    sliderBaseline: null,
     showControlCoach: true,
     currentTool: "move",
     autoOrientPath: false,
@@ -2161,6 +2164,7 @@
       userCharacters: state.userCharacters,
       userScenes: state.userScenes,
       userKeyframeSets: state.userKeyframeSets,
+      aiAssist: state.aiAssist,
       projects: state.projects
     });
   }
@@ -2176,6 +2180,8 @@
       ? model.userKeyframeSets.map(sanitizeKeyframeSet).filter(Boolean)
       : [];
     state.sceneColor = normalizeHexColor(model?.sceneColor, "#d9d2c5");
+    state.aiAssist = model?.aiAssist === true;
+    updateAiAssistUI();
     state.activeKeyframeSetId = allKeyframeSets().some((set) => set.id === model?.activeKeyframeSetId)
       ? model.activeKeyframeSetId
       : BUILTIN_KEYFRAME_SETS[0].id;
@@ -3800,11 +3806,130 @@
     state.currentTime = keyTime;
   }
 
+  /*
+   * AI AUTO-ASSIST — when enabled, finishing an edit on a bone spreads an
+   * eased fraction of that change into the neighbouring keyframes (the same
+   * frames the onion skin shows) and adds a damped follow-through to the
+   * bone's direct children, so the surrounding motion stays smooth without
+   * ever overwriting the pose the user just set. Every adjustment happens
+   * inside the caller's undo checkpoint, so one Undo reverts everything.
+   */
+  const ASSIST_NEIGHBOR_WEIGHT = 0.35;   // eased pull applied to prev/next keys
+  const ASSIST_CHILD_WEIGHT = 0.18;      // damped follow-through on child bones
+  const ASSIST_MIN_DELTA = 0.75;         // ignore micro-adjustments
+
+  function assistNeighborIndexes(track, time) {
+    if (!Array.isArray(track) || track.length < 2) {
+      return [];
+    }
+    const currentIndex = track.findIndex((key) => circularTimeDistance(key.time, time) < 0.6);
+    const result = new Set();
+    if (currentIndex >= 0) {
+      result.add((currentIndex - 1 + track.length) % track.length);
+      result.add((currentIndex + 1) % track.length);
+      result.delete(currentIndex);
+    } else {
+      // No key exactly here (e.g. child bone): take the nearest key on each side.
+      let previous = track.length - 1;
+      let next = 0;
+      for (let index = 0; index < track.length - 1; index += 1) {
+        if (time > track[index].time && time < track[index + 1].time) {
+          previous = index;
+          next = index + 1;
+          break;
+        }
+      }
+      result.add(previous);
+      result.add(next);
+    }
+    return [...result].filter((index) => circularTimeDistance(track[index].time, time) > 0.6);
+  }
+
+  function assistFalloff(track, index, time) {
+    const step = state.snapFps ? 1000 / state.snapFps : 80;
+    const distance = Math.max(step, circularTimeDistance(track[index].time, time));
+    // Adjacent frame gets the full weight; farther keys ease away smoothly.
+    return smoothstep(clamp(step / distance, 0, 1));
+  }
+
+  function assistBlendKey(track, index, delta, weight) {
+    const values = transform(track[index].values);
+    const blended = {};
+    TRANSFORM_PROPS.forEach((prop) => {
+      blended[prop] = values[prop] + (delta[prop] || 0) * weight;
+    });
+    track[index] = { time: track[index].time, values: transform(blended) };
+  }
+
+  function applyAiAssist(boneId, beforeValues) {
+    if (!state.aiAssist || !beforeValues) {
+      return 0;
+    }
+    const time = snapTime(state.currentTime);
+    const track = state.tracks[boneId];
+    const keyIndex = findKeyIndex(boneId, time);
+    if (!track || keyIndex < 0) {
+      return 0;
+    }
+    const before = transform(beforeValues);
+    const after = transform(track[keyIndex].values);
+    const delta = {};
+    let magnitude = 0;
+    TRANSFORM_PROPS.forEach((prop) => {
+      const change = prop === "rz" || prop === "ry"
+        ? shortestAngleDelta(before[prop], after[prop])
+        : after[prop] - before[prop];
+      delta[prop] = change;
+      magnitude += Math.abs(change) * (prop === "scale" ? 60 : 1);
+    });
+    if (magnitude < ASSIST_MIN_DELTA) {
+      return 0;
+    }
+
+    let touched = 0;
+
+    // 1) Ease the bone's own neighbouring keyframes toward the new pose.
+    assistNeighborIndexes(track, time).forEach((index) => {
+      assistBlendKey(track, index, delta, ASSIST_NEIGHBOR_WEIGHT * assistFalloff(track, index, time));
+      touched += 1;
+    });
+
+    // 2) Damped follow-through on direct children (rotation only), applied to
+    //    their neighbouring keys — never the current frame, so a pose the user
+    //    authored on a child is left untouched.
+    if (Math.abs(delta.rz) >= 1) {
+      const childDelta = { rz: -delta.rz * ASSIST_CHILD_WEIGHT };
+      (childrenByParent.get(boneId) || []).forEach((child) => {
+        const childTrack = state.tracks[child.id];
+        assistNeighborIndexes(childTrack, time).forEach((index) => {
+          assistBlendKey(childTrack, index, childDelta, assistFalloff(childTrack, index, time));
+          touched += 1;
+        });
+      });
+    }
+
+    if (touched) {
+      dom.gestureReadout.textContent =
+        `✨ AI ASSIST · eased ${touched} neighbouring key${touched > 1 ? "s" : ""} around ${Math.round(time)}ms`;
+    }
+    return touched;
+  }
+
+  function updateAiAssistUI() {
+    if (!dom.aiAssistToggle) {
+      return;
+    }
+    dom.aiAssistToggle.classList.toggle("active", state.aiAssist);
+    dom.aiAssistToggle.setAttribute("aria-pressed", String(state.aiAssist));
+  }
+
   function addOrUpdateKey() {
     pause();
     checkpoint();
+    const before = sampleTrack(state.tracks[state.selectedBoneId], state.currentTime);
     const values = poseForBone(state.selectedBoneId, state.currentTime, true);
     upsertKey(state.selectedBoneId, state.currentTime, values);
+    applyAiAssist(state.selectedBoneId, before);
     state.previewOverrides = {};
     projectChanged();
   }
@@ -4126,6 +4251,9 @@
       const direction = event.key === "ArrowLeft" ? -1 : 1;
       const step = state.snapFps ? 1000 / state.snapFps : 10;
       seek(state.currentTime + direction * step);
+    } else if (event.key.toLowerCase() === "a") {
+      event.preventDefault();
+      dom.aiAssistToggle.click();
     } else if (event.key.toLowerCase() === "h") {
       event.preventDefault();
       setTool("hand");
@@ -4665,6 +4793,7 @@
     state.cameraPointers.delete(event.pointerId);
     if (finishingCameraGesture) {
       if (state.drag?.moved && dom.autoKeyToggle.checked) {
+        applyAiAssist(state.drag.boneId, state.drag.startPose);
         checkpoint(state.drag.snapshot);
         projectChanged();
       }
@@ -4694,6 +4823,7 @@
     }
     state.activePointers.delete(event.pointerId);
     if (state.drag?.moved && dom.autoKeyToggle.checked) {
+      applyAiAssist(state.drag.boneId, state.drag.startPose);
       checkpoint(state.drag.snapshot);
       projectChanged();
     }
@@ -4718,6 +4848,7 @@
     dom.propertyInputs.forEach((input) => {
       input.addEventListener("pointerdown", () => {
         state.sliderSnapshot = dom.autoKeyToggle.checked ? projectSnapshot() : null;
+        state.sliderBaseline = poseForBone(state.selectedBoneId, state.currentTime, true);
         pause();
       });
       input.addEventListener("input", () => {
@@ -4737,10 +4868,12 @@
       });
       input.addEventListener("change", () => {
         if (dom.autoKeyToggle.checked && state.sliderSnapshot) {
+          applyAiAssist(state.selectedBoneId, state.sliderBaseline);
           checkpoint(state.sliderSnapshot);
           projectChanged();
         }
         state.sliderSnapshot = null;
+        state.sliderBaseline = null;
       });
     });
   }
@@ -4816,6 +4949,14 @@
       dom.onionToggle.classList.toggle("active", state.showOnion);
       dom.onionToggle.setAttribute("aria-pressed", String(state.showOnion));
       state.dirty = true;
+    });
+    dom.aiAssistToggle.addEventListener("click", () => {
+      state.aiAssist = !state.aiAssist;
+      updateAiAssistUI();
+      dom.gestureReadout.textContent = state.aiAssist
+        ? "✨ AI ASSIST ON · moving a bone now eases the neighbouring keyframes for you"
+        : "AI ASSIST OFF · edits only touch the current keyframe";
+      scheduleAutosave();
     });
     dom.gridToggle.addEventListener("click", () => {
       const active = dom.stageShell.classList.toggle("show-grid");

@@ -504,6 +504,13 @@ select:focus-visible {
   background: #a9e9f3;
 }
 
+.mini-button.ai-assist.active {
+  color: #2a1140;
+  border-color: rgba(196, 148, 255, .55);
+  background: #c9a2ff;
+  box-shadow: 0 0 9px rgba(178, 121, 255, .45);
+}
+
 .stage-shell {
   position: relative;
   min-width: 0;
